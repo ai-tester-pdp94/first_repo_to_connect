@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.cursor
+agent-tools
+data
+**/*.db
+**/*.db-*
+.env*
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+Dockerfile
+.dockerignore
+fly.toml
+README.md
