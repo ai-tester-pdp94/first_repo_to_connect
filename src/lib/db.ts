@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 import { communityLibrary } from "@/lib/community-library";
+import { splitSteps } from "@/lib/normalize";
 import type {
   Area,
   CaseRecord,
@@ -397,13 +398,29 @@ export function updateUserCase(
 
 export function saveVerifiedNote(id: string, note: string) {
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
+  const steps = splitSteps(note);
+  const recorded = steps.length > 0 ? steps : [note.trim()];
+  const summary = recorded[0];
+  const db = getDb();
+  const write = db.transaction(() => {
+    const existing = db
+      .prepare("SELECT origin FROM cases WHERE id = ?")
+      .get(id) as { origin: Origin } | undefined;
+    if (!existing) return;
+    db.prepare(
       `UPDATE cases
-       SET verified_note = ?, provenance = 'verified', updated_at = ?
+       SET verified_note = ?, provenance = 'verified', summary = ?, updated_at = ?
        WHERE id = ?`,
-    )
-    .run(note, now, id);
+    ).run(note, summary, now, id);
+    // Shipped community steps stay read-only. A landscape note is the verified summary.
+    if (existing.origin === "community") return;
+    db.prepare("DELETE FROM steps WHERE case_id = ?").run(id);
+    const insert = db.prepare(
+      "INSERT INTO steps (case_id, position, body) VALUES (?, ?, ?)",
+    );
+    recorded.forEach((body, position) => insert.run(id, position, body));
+  });
+  write();
 }
 
 export function attachResearch(
