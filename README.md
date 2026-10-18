@@ -15,15 +15,17 @@ npm run dev -- --port 4317 --hostname 127.0.0.1
 
 Open [http://127.0.0.1:4317](http://127.0.0.1:4317).
 
-Cases are stored in `data/ledger.db`. That file stays on this machine and is not committed. The SAP Community library is loaded into the database the first time the app starts. Set `ERROR_BOOK_DATA_DIR` to keep the file somewhere else.
+Cases are stored in `data/ledger.db`. That file stays on this machine and is not committed. Set `ERROR_BOOK_DATA_DIR` to keep the file somewhere else.
+
+On startup the app syncs the shipped community library (`src/lib/community-library.ts`) into the database. A content hash in a `meta` table detects library changes: new ids are inserted and existing community rows are updated (steps and sources replaced) so deepened text reaches databases that already seeded an older build. User-authored cases are never overwritten. Landscape `verified_note`, `research_draft`, and `provenance` on community rows are preserved across refreshes.
 
 ## What is already in the book
 
-IDoc: status 51, 56, 29, 30, 03 with a stuck tRFC, 64, 26 and 60, 02 including code page and EA390 into Integration Suite, 65, 66, and the reprocess programs that do not clone the IDoc.
+IDoc: status 51, 56, 29, 30 (including Collect / destination NONE), 03 with stuck tRFC, 64 (including DIA and residual after RBDAPP01), 26 and 60, 02 including code page and EA390 into Integration Suite, 65, 66 (RBDAPP01), inbound processing stop, and the reprocess programs that do not clone the IDoc.
 
-Integration Suite: PKIX path building, HTTPS sender 401, OAuth client credentials, CSRF 403, IDoc 403 into S/4, Cloud Connector host and handshake failures, invalid IDoc SOAP namespace, an empty IDoc filter, SFTP auth fail, and an SFTP sender that never creates a message.
+Integration Suite: PKIX / token-host trust, HTTPS sender 401 and service-key expiry, OAuth client credentials and Authorization Code refresh, CSRF 403, IDoc 403 into S/4, Cloud Connector host / handshake / subaccount cert, JMS capacity and EOIO head-of-line, JDBC pool and long-tx design, AS2 MDN, XI queues, size limits, principal propagation, S/4 SAML Bearer, ProcessDirect address mismatch, SapMessageId Exactly-Once, invalid IDoc SOAP namespace, empty IDoc filter, and SFTP auth / silent sender.
 
-Each entry links to the SAP Community thread it came from. Where a fix was specific to one landscape, the entry says so.
+Each entry links to SAP Help, KBAs, or Community threads. Where a fix was specific to one landscape, the entry says so.
 
 ## Investigate
 
