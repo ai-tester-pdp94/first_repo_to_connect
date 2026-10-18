@@ -5,6 +5,8 @@ import type { Area, CaseSummary, Provenance, SearchHit } from "@/lib/types";
 export type KindFilter = "all" | Provenance;
 
 const STRONG = 14;
+const RELEVANT = 10;
+const VERIFIED_RANK = 20;
 
 function statusQuery(query: string): string | null {
   const labeled = query.match(/\bstatus\s+(\d{2})\b/);
@@ -54,8 +56,7 @@ export function scoreCase(rawQuery: string, item: CaseSummary, inFts: boolean): 
   }
 
   if (inFts) score += 2;
-  if (item.provenance === "verified") score += 20;
-  else if (item.origin === "user") score += 4;
+  if (item.provenance !== "verified" && item.origin === "user") score += 4;
   return score;
 }
 
@@ -97,11 +98,13 @@ export function searchCases(options: {
   const matched = tokens.length ? ftsIds(tokens.join(" OR ")) : new Set<string>();
 
   const hits = cases
-    .map((item) => {
-      const score = scoreCase(query, item, matched.has(item.id));
-      return { ...item, score, strong: score >= STRONG };
+    .flatMap((item) => {
+      const relevance = scoreCase(query, item, matched.has(item.id));
+      if (relevance < RELEVANT) return [];
+      const score =
+        relevance + (item.provenance === "verified" ? VERIFIED_RANK : 0);
+      return [{ ...item, score, strong: relevance >= STRONG }];
     })
-    .filter((item) => item.score >= 10)
     .sort((a, b) => b.score - a.score || a.sortOrder - b.sortOrder);
 
   return {
