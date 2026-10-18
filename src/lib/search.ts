@@ -40,7 +40,7 @@ export function scoreCase(rawQuery: string, item: CaseSummary, inFts: boolean): 
     score += 18;
   }
 
-  const http = query.match(/\b(401|403|415|500)\b/);
+  const http = query.match(/\b(401|403|413|415|500)\b/);
   if (http) {
     const token = http[1];
     const mentioned = item.signatures.some((signature) =>

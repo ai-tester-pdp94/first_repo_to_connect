@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
@@ -7,11 +8,20 @@ import type {
   Area,
   CaseRecord,
   CaseSummary,
+  LibraryEntry,
   Origin,
   Provenance,
   SourceKind,
   SourceLink,
 } from "@/lib/types";
+
+const COMMUNITY_LIBRARY_HASH_KEY = "community_library_hash";
+
+function communityLibraryHash(): string {
+  return createHash("sha256")
+    .update(JSON.stringify(communityLibrary))
+    .digest("hex");
+}
 
 type CaseRow = {
   id: string;
@@ -105,12 +115,38 @@ function migrate(db: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
-      url TEXT NOT NULL
+      url TEXT NOT NULL,
+      seeded INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS cases_area ON cases(area);
     CREATE INDEX IF NOT EXISTS cases_provenance ON cases(provenance);
+
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
+
+  const sourceCols = db.prepare("PRAGMA table_info(sources)").all() as {
+    name: string;
+  }[];
+  if (!sourceCols.some((col) => col.name === "seeded")) {
+    db.exec(
+      "ALTER TABLE sources ADD COLUMN seeded INTEGER NOT NULL DEFAULT 0",
+    );
+    const markSeeded = db.prepare(
+      "UPDATE sources SET seeded = 1 WHERE case_id = ? AND url = ?",
+    );
+    const backfill = db.transaction(() => {
+      communityLibrary.forEach((entry) => {
+        entry.sources.forEach((source) => {
+          markSeeded.run(entry.id, source.url);
+        });
+      });
+    });
+    backfill();
+  }
 
   const fts = db
     .prepare(
@@ -171,13 +207,53 @@ function migrate(db: Database.Database) {
           new.message_type, new.idoc_type, new.partner, new.iflow, new.adapter, new.verified_note
         );
       END;
+
+      INSERT INTO cases_fts(
+        rowid, title, summary, error_text, signatures, status_code,
+        message_type, idoc_type, partner, iflow, adapter, verified_note
+      )
+      SELECT
+        rowid, title, summary, error_text, signatures, status_code,
+        message_type, idoc_type, partner, iflow, adapter, verified_note
+      FROM cases;
     `);
   }
 }
 
+function replaceStepsAndLibrarySources(
+  db: Database.Database,
+  entry: LibraryEntry,
+  insertStep: Database.Statement,
+  insertLibrarySource: Database.Statement,
+) {
+  db.prepare("DELETE FROM steps WHERE case_id = ?").run(entry.id);
+  entry.steps.forEach((step, position) => {
+    insertStep.run(entry.id, position, step);
+  });
+
+  // Drop only library-seeded links; Investigate / attachResearch rows stay (seeded = 0).
+  db.prepare("DELETE FROM sources WHERE case_id = ? AND seeded = 1").run(
+    entry.id,
+  );
+  entry.sources.forEach((source) => {
+    insertLibrarySource.run(entry.id, source.title, source.url);
+  });
+}
+
+/**
+ * Sync shipped community cases from `communityLibrary`.
+ * When the library content hash changes, upsert every community entry so
+ * deepened text reaches existing DBs. User-authored cases are never touched.
+ * Preserves created_at, verified_note, research_draft, provenance, and
+ * non-library source URLs (e.g. Investigate attachments) on update.
+ */
 function seed(db: Database.Database) {
-  const existing = db.prepare("SELECT id FROM cases WHERE origin = 'community'").all() as { id: string }[];
-  const have = new Set(existing.map((row) => row.id));
+  const hash = communityLibraryHash();
+  const stored = db
+    .prepare("SELECT value FROM meta WHERE key = ?")
+    .get(COMMUNITY_LIBRARY_HASH_KEY) as { value: string } | undefined;
+  if (stored?.value === hash) return;
+
   const insertCase = db.prepare(`
     INSERT INTO cases (
       id, created_at, updated_at, area, origin, provenance, source, title, summary,
@@ -187,21 +263,36 @@ function seed(db: Database.Database) {
       @error_text, @signatures, @status_code, @landscape_note, @sort_order
     )
   `);
+  const updateCase = db.prepare(`
+    UPDATE cases SET
+      updated_at = @updated_at,
+      area = @area,
+      title = @title,
+      summary = @summary,
+      error_text = @error_text,
+      signatures = @signatures,
+      status_code = @status_code,
+      landscape_note = @landscape_note,
+      sort_order = @sort_order
+    WHERE id = @id AND origin = 'community'
+  `);
   const insertStep = db.prepare(
     "INSERT INTO steps (case_id, position, body) VALUES (?, ?, ?)",
   );
-  const insertSource = db.prepare(
-    "INSERT INTO sources (case_id, title, url) VALUES (?, ?, ?)",
+  const insertLibrarySource = db.prepare(
+    "INSERT INTO sources (case_id, title, url, seeded) VALUES (?, ?, ?, 1)",
   );
-  const now = "2026-01-01T00:00:00.000Z";
+  const selectOrigin = db.prepare("SELECT origin FROM cases WHERE id = ?");
+  const seedNow = "2026-01-01T00:00:00.000Z";
+  const refreshAt = new Date().toISOString();
 
-  const seedMissing = db.transaction(() => {
+  const syncCommunity = db.transaction(() => {
     communityLibrary.forEach((entry, index) => {
-      if (have.has(entry.id)) return;
-      insertCase.run({
+      const existing = selectOrigin.get(entry.id) as { origin: Origin } | undefined;
+      if (existing?.origin === "user") return;
+
+      const payload = {
         id: entry.id,
-        created_at: now,
-        updated_at: now,
         area: entry.area,
         title: entry.title,
         summary: entry.summary,
@@ -210,16 +301,28 @@ function seed(db: Database.Database) {
         status_code: entry.statusCode ?? null,
         landscape_note: entry.landscapeNote ?? null,
         sort_order: index,
+      };
+
+      if (existing?.origin === "community") {
+        updateCase.run({ ...payload, updated_at: refreshAt });
+        replaceStepsAndLibrarySources(db, entry, insertStep, insertLibrarySource);
+        return;
+      }
+
+      insertCase.run({
+        ...payload,
+        created_at: seedNow,
+        updated_at: seedNow,
       });
-      entry.steps.forEach((step, position) => {
-        insertStep.run(entry.id, position, step);
-      });
-      entry.sources.forEach((source) => {
-        insertSource.run(entry.id, source.title, source.url);
-      });
+      replaceStepsAndLibrarySources(db, entry, insertStep, insertLibrarySource);
     });
+
+    db.prepare(
+      `INSERT INTO meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(COMMUNITY_LIBRARY_HASH_KEY, hash);
   });
-  seedMissing();
+  syncCommunity();
 }
 
 export function getDb() {
@@ -232,6 +335,11 @@ export function getDb() {
     globalForDb.ledger = db;
   }
   return globalForDb.ledger;
+}
+
+/** Re-check library hash and upsert community cases when the shipped catalog changed. */
+export function syncCommunityLibrary() {
+  seed(getDb());
 }
 
 export function listCases(): CaseSummary[] {
@@ -435,8 +543,8 @@ export function attachResearch(
       "UPDATE cases SET research_draft = ?, updated_at = ? WHERE id = ?",
     ).run(draft, now, id);
     const insert = db.prepare(
-      `INSERT INTO sources (case_id, title, url)
-       SELECT ?, ?, ?
+      `INSERT INTO sources (case_id, title, url, seeded)
+       SELECT ?, ?, ?, 0
        WHERE NOT EXISTS (SELECT 1 FROM sources WHERE case_id = ? AND url = ?)`,
     );
     sources.forEach((source) => {
