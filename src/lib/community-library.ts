@@ -1719,9 +1719,9 @@ export const communityLibrary: LibraryEntry[] = [
       "dynamic address",
     ],
     steps: [
-      "Compare the Address field on the ProcessDirect sender (producer) with the Address on the ProcessDirect receiver (consumer). They must match character for character.",
-      "Confirm the consumer iFlow is deployed and Started in Manage Integration Content. A stopped or undeployed consumer looks like a dead producer.",
-      "Use dynamic Address only on the ProcessDirect receiver pointing at fixed known senders — dynamic sender addresses are a common misconfiguration.",
+      "Compare the Address on the ProcessDirect sender adapter (consumer iFlow) with the Address on the ProcessDirect receiver adapter (producer iFlow). They must match character for character.",
+      "Confirm the consumer iFlow (the one with the ProcessDirect sender) is deployed and Started in Manage Integration Content. A stopped or undeployed consumer looks like a dead producer.",
+      "Use dynamic Address only on the ProcessDirect receiver (producer) toward fixed known ProcessDirect senders (consumers) — putting a dynamic address on the sender/consumer side is a common misconfiguration.",
       "ProcessDirect is in-tenant only. Do not expect Cloud Connector, load balancing, or cross-tenant routing to bridge a typo.",
     ],
     sources: [

@@ -17,7 +17,7 @@ Open [http://127.0.0.1:4317](http://127.0.0.1:4317).
 
 Cases are stored in `data/ledger.db`. That file stays on this machine and is not committed. Set `ERROR_BOOK_DATA_DIR` to keep the file somewhere else.
 
-On startup the app syncs the shipped community library (`src/lib/community-library.ts`) into the database. A content hash in a `meta` table detects library changes: new ids are inserted and existing community rows are updated (steps and sources replaced) so deepened text reaches databases that already seeded an older build. User-authored cases are never overwritten. Landscape `verified_note`, `research_draft`, and `provenance` on community rows are preserved across refreshes.
+On startup the app syncs the shipped community library (`src/lib/community-library.ts`) into the database. A content hash in a `meta` table detects library changes: new ids are inserted and existing community rows are updated (steps replaced; library source links refreshed) so deepened text reaches databases that already seeded an older build. User-authored cases are never overwritten. Landscape `verified_note`, `research_draft`, `provenance`, and Investigate-attached source URLs on community rows are preserved across refreshes.
 
 ## What is already in the book
 

@@ -115,7 +115,8 @@ function migrate(db: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
-      url TEXT NOT NULL
+      url TEXT NOT NULL,
+      seeded INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS cases_area ON cases(area);
@@ -126,6 +127,26 @@ function migrate(db: Database.Database) {
       value TEXT NOT NULL
     );
   `);
+
+  const sourceCols = db.prepare("PRAGMA table_info(sources)").all() as {
+    name: string;
+  }[];
+  if (!sourceCols.some((col) => col.name === "seeded")) {
+    db.exec(
+      "ALTER TABLE sources ADD COLUMN seeded INTEGER NOT NULL DEFAULT 0",
+    );
+    const markSeeded = db.prepare(
+      "UPDATE sources SET seeded = 1 WHERE case_id = ? AND url = ?",
+    );
+    const backfill = db.transaction(() => {
+      communityLibrary.forEach((entry) => {
+        entry.sources.forEach((source) => {
+          markSeeded.run(entry.id, source.url);
+        });
+      });
+    });
+    backfill();
+  }
 
   const fts = db
     .prepare(
@@ -199,19 +220,23 @@ function migrate(db: Database.Database) {
   }
 }
 
-function replaceStepsAndSources(
+function replaceStepsAndLibrarySources(
   db: Database.Database,
   entry: LibraryEntry,
   insertStep: Database.Statement,
-  insertSource: Database.Statement,
+  insertLibrarySource: Database.Statement,
 ) {
   db.prepare("DELETE FROM steps WHERE case_id = ?").run(entry.id);
-  db.prepare("DELETE FROM sources WHERE case_id = ?").run(entry.id);
   entry.steps.forEach((step, position) => {
     insertStep.run(entry.id, position, step);
   });
+
+  // Drop only library-seeded links; Investigate / attachResearch rows stay (seeded = 0).
+  db.prepare("DELETE FROM sources WHERE case_id = ? AND seeded = 1").run(
+    entry.id,
+  );
   entry.sources.forEach((source) => {
-    insertSource.run(entry.id, source.title, source.url);
+    insertLibrarySource.run(entry.id, source.title, source.url);
   });
 }
 
@@ -219,7 +244,8 @@ function replaceStepsAndSources(
  * Sync shipped community cases from `communityLibrary`.
  * When the library content hash changes, upsert every community entry so
  * deepened text reaches existing DBs. User-authored cases are never touched.
- * Preserves created_at, verified_note, research_draft, and provenance on update.
+ * Preserves created_at, verified_note, research_draft, provenance, and
+ * non-library source URLs (e.g. Investigate attachments) on update.
  */
 function seed(db: Database.Database) {
   const hash = communityLibraryHash();
@@ -253,8 +279,8 @@ function seed(db: Database.Database) {
   const insertStep = db.prepare(
     "INSERT INTO steps (case_id, position, body) VALUES (?, ?, ?)",
   );
-  const insertSource = db.prepare(
-    "INSERT INTO sources (case_id, title, url) VALUES (?, ?, ?)",
+  const insertLibrarySource = db.prepare(
+    "INSERT INTO sources (case_id, title, url, seeded) VALUES (?, ?, ?, 1)",
   );
   const selectOrigin = db.prepare("SELECT origin FROM cases WHERE id = ?");
   const seedNow = "2026-01-01T00:00:00.000Z";
@@ -279,7 +305,7 @@ function seed(db: Database.Database) {
 
       if (existing?.origin === "community") {
         updateCase.run({ ...payload, updated_at: refreshAt });
-        replaceStepsAndSources(db, entry, insertStep, insertSource);
+        replaceStepsAndLibrarySources(db, entry, insertStep, insertLibrarySource);
         return;
       }
 
@@ -288,7 +314,7 @@ function seed(db: Database.Database) {
         created_at: seedNow,
         updated_at: seedNow,
       });
-      replaceStepsAndSources(db, entry, insertStep, insertSource);
+      replaceStepsAndLibrarySources(db, entry, insertStep, insertLibrarySource);
     });
 
     db.prepare(
@@ -309,6 +335,11 @@ export function getDb() {
     globalForDb.ledger = db;
   }
   return globalForDb.ledger;
+}
+
+/** Re-check library hash and upsert community cases when the shipped catalog changed. */
+export function syncCommunityLibrary() {
+  seed(getDb());
 }
 
 export function listCases(): CaseSummary[] {
@@ -512,8 +543,8 @@ export function attachResearch(
       "UPDATE cases SET research_draft = ?, updated_at = ? WHERE id = ?",
     ).run(draft, now, id);
     const insert = db.prepare(
-      `INSERT INTO sources (case_id, title, url)
-       SELECT ?, ?, ?
+      `INSERT INTO sources (case_id, title, url, seeded)
+       SELECT ?, ?, ?, 0
        WHERE NOT EXISTS (SELECT 1 FROM sources WHERE case_id = ? AND url = ?)`,
     );
     sources.forEach((source) => {
