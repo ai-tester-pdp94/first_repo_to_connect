@@ -1700,4 +1700,121 @@ export const communityLibrary: LibraryEntry[] = [
       },
     ],
   },
+
+  // --- Net-new: P2 ---
+  {
+    id: "community-cpi-processdirect",
+    area: "cpi",
+    title: "ProcessDirect address mismatch or consumer not deployed",
+    summary:
+      "ProcessDirect binds by exact in-tenant Address — there is no load balancer. Producer and consumer must match, and the consumer iFlow must be Started.",
+    errorText:
+      "ProcessDirect producer address does not match consumer. Consumer not Started. Dynamic address on sender ProcessDirect. No consumer listening.",
+    signatures: [
+      "processdirect",
+      "process direct",
+      "address mismatch",
+      "consumer not deployed",
+      "consumer not started",
+      "dynamic address",
+    ],
+    steps: [
+      "Compare the Address field on the ProcessDirect sender (producer) with the Address on the ProcessDirect receiver (consumer). They must match character for character.",
+      "Confirm the consumer iFlow is deployed and Started in Manage Integration Content. A stopped or undeployed consumer looks like a dead producer.",
+      "Use dynamic Address only on the ProcessDirect receiver pointing at fixed known senders — dynamic sender addresses are a common misconfiguration.",
+      "ProcessDirect is in-tenant only. Do not expect Cloud Connector, load balancing, or cross-tenant routing to bridge a typo.",
+    ],
+    sources: [
+      {
+        title: "ProcessDirect Adapter (SAP)",
+        url: "https://community.sap.com/t5/technology-blog-posts-by-sap/processdirect-adapter/ba-p/13351290",
+      },
+      {
+        title: "Dynamic address in sender Process Direct adapter",
+        url: "https://community.sap.com/t5/technology-q-a/dynamic-address-in-sender-process-direct-adapter/qaq-p/12650604",
+      },
+      {
+        title: "Help – Configure ProcessDirect Receiver Adapter",
+        url: "https://help.sap.com/docs/cloud-integration/sap-cloud-integration/configure-processdirect-receiver-adapter",
+      },
+    ],
+  },
+  {
+    id: "community-cpi-service-key-expiry",
+    area: "cpi",
+    title: "CF Process Integration service key or X.509 credential expired",
+    summary:
+      "Inbound callers that worked for months fail when a finite-lifetime service key or X.509 credential hits validUntil. Distinct from “wrong S-user” 401 — this is time-based credential death.",
+    errorText:
+      "Inbound fails after service key validuntil. X.509 service key expired. No XSUAA token. HTTP 401/403 from previously working senders. Process Integration Runtime credential expiry.",
+    signatures: [
+      "service key expiry",
+      "validuntil",
+      "x.509 service key",
+      "xsuaa token",
+      "credential expired",
+      "service key expired",
+    ],
+    landscapeNote:
+      "Complements community-cpi-401 (wrong identity / MessagingSend) and community-cpi-oauth (outbound client-creds). Here the credential was correct until it expired.",
+    steps: [
+      "Inventory Process Integration Runtime (integration-flow) service keys and note validUntil / creation dates against the outage start.",
+      "Create a new service key (or renew X.509 material), update every external sender’s client id/secret/token URL or certificate, verify one caller, then delete the expired key.",
+      "Prefer overlapping validity during rotation so senders can cut over without a hard outage.",
+      "Add expiry notification (custom iFlow / Alert Notification pattern) before the next cycle — CF does not email every landscape by default.",
+    ],
+    sources: [
+      {
+        title: "Notification for expiration of service keys / certificates (CF)",
+        url: "https://community.sap.com/t5/technology-blog-posts-by-members/notification-for-expiration-of-service-keys-certificates-in-cloud-foundry/ba-p/13559692",
+      },
+      {
+        title: "Help – OAuth inbound client credentials for API clients",
+        url: "https://help.sap.com/docs/cloud-integration/sap-cloud-integration/setting-up-oauth-inbound-authentication-with-client-credentials-grant-for-api-clients",
+      },
+      {
+        title: "OAuth with Client Credentials Grant for API Clients",
+        url: "https://help.sap.com/docs/integration-suite/sap-integration-suite/oauth-with-client-credentials-grant-for-api-clients",
+      },
+    ],
+  },
+  {
+    id: "community-cpi-jdbc-tx-design",
+    area: "cpi",
+    title: "Long-held JDBC transactions / DataStore lock design",
+    summary:
+      "Keeping JDBC Required open across slow receivers or large DataStore work starves the shared tenant pool. Design for short local persistency — this is the feeder pattern behind JDBC pool exhaustion.",
+    errorText:
+      "Intermittent Timeout waiting for idle object. DataStore Sender with JDBC Required across slow receivers. Long-held JDBC transaction. Pool starvation under concurrent persistency.",
+    signatures: [
+      "jdbc required",
+      "long transaction",
+      "datastore sender",
+      "transaction handling",
+      "jdbc timeout intermittent",
+      "persistency design",
+    ],
+    landscapeNote:
+      "When many iFlows already fail with pool exhausted, clear the acute outage with the JDBC pool case first, then redesign long transactions so it does not recur.",
+    steps: [
+      "Find iFlows that wrap slow HTTP/receiver calls inside JDBC Required or hold DataStore work across long branches.",
+      "Move persistency into short local process steps. Use JDBC Required only when a true rollback boundary is required — not as a default around the whole flow.",
+      "Stagger timers and reduce concurrent DataStore/Aggregator writers that hold connections.",
+      "After redesign, confirm pool timeouts stop under the same load. Pair with the internal JDBC pool exhausted case for acute triage.",
+    ],
+    sources: [
+      {
+        title: "Transaction handling in integration flow (SAP)",
+        url: "https://community.sap.com/t5/technology-blogs-by-sap/cloud-integration-how-to-configure-transaction-handling-in-integration-flow/ba-p/13332565",
+      },
+      {
+        title: "Help – performance / data store",
+        url: "https://help.sap.com/doc/978cdb2059244c10b55a8bd916484a63/CLOUD/en-US/b98a7caa6c871014bc6ce3c22a1e81b1.html",
+      },
+      {
+        title: "Q&A citing KBA 2492017 – DB connection pool",
+        url: "https://community.sap.com/t5/technology-q-a/sci-sap-cloud-integration-db-connection-always-failed-when-try-to-call-db/qaq-p/12562015",
+      },
+    ],
+  },
 ];
