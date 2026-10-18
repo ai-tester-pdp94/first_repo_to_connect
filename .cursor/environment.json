@@ -1,0 +1,5 @@
+{
+  "name": "Integration Error Book",
+  "install": "npm ci",
+  "start": "bash .cursor/start.sh"
+}
