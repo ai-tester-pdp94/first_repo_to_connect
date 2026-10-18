@@ -225,7 +225,16 @@ export function InvestigatePanel({
           <form action={saveAction} className="space-y-3 border-t pt-4">
             {caseId ? <input type="hidden" name="id" value={caseId} /> : null}
             <input type="hidden" name="errorText" value={searchedText} />
-            <input type="hidden" name="sources" value={JSON.stringify(result.sources)} />
+            <input
+              type="hidden"
+              name="sources"
+              value={JSON.stringify(
+                result.sources.map((source) => ({
+                  title: source.title,
+                  url: source.url,
+                })),
+              )}
+            />
             <div className="space-y-2">
               <Label htmlFor="draft">Draft to keep with this error</Label>
               <textarea

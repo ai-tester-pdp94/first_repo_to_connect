@@ -17,6 +17,7 @@ import {
   titleFromError,
 } from "@/lib/normalize";
 import { denyWithoutSession } from "@/lib/session";
+import { sourceLinksFromPayload } from "@/lib/source-links";
 import type { Area, SourceKind, SourceLink } from "@/lib/types";
 
 export type ActionState = { error?: string } | null;
@@ -65,27 +66,9 @@ function readCaseFields(formData: FormData) {
   };
 }
 
-function readSources(raw: string): SourceLink[] {
-  try {
-    const parsed = JSON.parse(raw) as SourceLink[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (item) =>
-          item &&
-          typeof item.title === "string" &&
-          typeof item.url === "string" &&
-          item.url.startsWith("https://") &&
-          item.url.includes("sap.com"),
-      )
-      .slice(0, 8)
-      .map((item) => ({
-        title: item.title.slice(0, 180),
-        url: item.url.slice(0, 500),
-      }));
-  } catch {
-    return [];
-  }
+function readSources(value: FormDataEntryValue | null): SourceLink[] {
+  if (typeof value !== "string") return [];
+  return sourceLinksFromPayload(value);
 }
 
 export async function createCase(
@@ -141,7 +124,7 @@ export async function createInvestigatedCase(
   const source = SOURCES.has(sourceValue as SourceKind)
     ? (sourceValue as SourceKind)
     : "monitoring";
-  const sources = readSources(clean(formData.get("sources"), 8000));
+  const sources = readSources(formData.get("sources"));
   const id = randomUUID();
   const title = clean(formData.get("title"), 180) || titleFromError(errorText);
 
@@ -248,7 +231,7 @@ export async function saveResearch(
   const draft = clean(formData.get("draft"), 20000);
   if (!id || !getCase(id)) return { error: "That case is no longer in the book." };
   if (!draft) return { error: "There is no draft to attach." };
-  const sources = readSources(clean(formData.get("sources"), 8000));
+  const sources = readSources(formData.get("sources"));
   attachResearch(id, draft, sources);
   revalidatePath(`/cases/${id}`);
   revalidatePath("/");
